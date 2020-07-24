@@ -1,6 +1,10 @@
 import Head from 'next/head'
 
-export default function Home() {
+interface Props {
+  name: string
+}
+
+export default function Home(props: Props) {
   return (
     <div className="container">
       <Head>
@@ -8,7 +12,7 @@ export default function Home() {
       </Head>
       
       <main>
-        <h1>Hi</h1>
+        <h1>Hi {props.name}!</h1>
       </main>
     </div>
   )
