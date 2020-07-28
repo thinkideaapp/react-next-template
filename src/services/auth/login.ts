@@ -1,4 +1,4 @@
-import { User } from "./types"
+import { User } from "../../types/user.type"
 
 export const login = async (username: string, password: string): Promise<User|null> => {
     return new Promise((resolve, reject) => {
