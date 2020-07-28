@@ -1,8 +1,6 @@
+import React from 'react'
 import Head from 'next/head'
-
-interface Props {
-  name: string
-}
+import { Props } from './types'
 
 export default function Home(props: Props) {
   return (
@@ -12,7 +10,7 @@ export default function Home(props: Props) {
       </Head>
       
       <main>
-        <h1>Hi {props.name}!</h1>
+        <h1 data-testid='title'>Hi {props.name}!</h1>
       </main>
     </div>
   )
