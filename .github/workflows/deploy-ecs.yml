@@ -1,0 +1,91 @@
+name: Deploy ecs
+
+on:
+  push:
+    branches:
+      - master
+
+    tags:
+      - v*
+env:
+  IMAGE_NAME: marketplace-front
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run tests
+        run: |
+          docker build . --file Dockerfile
+
+  push:
+    needs: test
+
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Build image
+        run: docker build . --file Dockerfile --tag $IMAGE_NAME
+
+      - name: Log into registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
+
+      - name: Push image
+        run: |
+          IMAGE_ID=docker.pkg.github.com/${{ github.repository }}/$IMAGE_NAME
+
+          # Change all uppercase to lowercase
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+
+          # Strip git ref prefix from version
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+
+          # Strip "v" prefix from tag name
+          [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
+
+          # Use Docker `latest` tag convention
+          [ "$VERSION" == "master" ] && VERSION=latest
+
+          SHA_HORT=$(git rev-parse --short HEAD)
+
+          echo ::set-env name=VERSION::$VERSION
+          echo ::set-env name=SHA_HORT::$SHA_HORT
+
+          docker tag $IMAGE_NAME $IMAGE_ID:$VERSION
+          docker tag $IMAGE_NAME $IMAGE_ID:$SHA_HORT
+          docker push $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:$SHA_HORT
+
+  deploy:
+    needs: push
+
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Prepare version
+        id: version
+        run: echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+
+      - name: Deploy to AWS CloudFormation SensiMarketplaceFront Stack
+        run: |
+          echo aws cloudformation update-stack \
+            --stack-name c \
+            --template-body file://./aws/services/marketplacefront.yaml \
+            --parameters ParameterKey=ImageTag,ParameterValue=${{ steps.version.outputs.sha_short }} \
+          aws cloudformation wait stack-update-complete --stack-name SensiMarketplaceFront

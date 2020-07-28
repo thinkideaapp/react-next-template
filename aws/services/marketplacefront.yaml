@@ -1,0 +1,290 @@
+Description: Marketplace Front Service
+
+Parameters:
+  CustomSubDomain:
+    Type: String
+    Description: 'Custom sub domain client. Example buriti para buriti.front.sensiconnect.io'
+
+  CustomDomain:
+    Type: String
+    Description: 'Custom domain client. Example marketplace.com.br'
+
+Resources:
+
+  ApiDomain:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !ImportValue SensiConnectZone
+      Name: !Join ['.', [!Ref CustomSubDomain, api, !ImportValue SensiConnectDomain]]
+      Type: CNAME
+      ResourceRecords:
+        - !ImportValue ApplicationLoadBalancerCustomDns
+      TTL: 3600
+
+  HttpsListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: TargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Join ['.', [!Ref CustomSubDomain, api, !ImportValue SensiConnectDomain]]
+      ListenerArn: !ImportValue HttpsListener
+      Priority: !Ref LoadBalanceListenerPriority
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 60
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 30
+      HealthyThresholdCount: 2
+      HealthCheckPath: /oauth/health
+      Matcher:
+        HttpCode: 200
+      UnhealthyThresholdCount: 3
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+        - Key: load_balancing.algorithm.type
+          Value: least_outstanding_requests
+      TargetType: ip
+      VpcId: !ImportValue VpcId
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !ImportValue Cluster
+      LaunchType: FARGATE
+      DesiredCount: 2
+      HealthCheckGracePeriodSeconds: 100
+      LoadBalancers:
+        - ContainerName: web-server
+          ContainerPort: 80
+          TargetGroupArn: !Ref TargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue ContainerSecurityGroup
+          Subnets:
+            - !ImportValue PrivateSubnetOne
+            - !ImportValue PrivateSubnetTwo
+      TaskDefinition: !Ref ServiceTaskDefinition
+
+  ServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Environment:
+            - Name: TENANT_NAME
+              Value: !Ref TenantName
+            - Name: APP_ENV
+              Value: production
+            - Name: APP_HASH
+              Value: !Ref ImageTag
+            - Name: API_DEBUG
+              Value: False
+            - Name: PORT
+              Value: 80
+            - Name: AWS_ACCESS_KEY_ID
+              Value: AKIAX3JMOOIHXU7AXVGH
+            - Name: AWS_SECRET_ACCESS_KEY
+              Value: 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
+            - Name: AWS_BUCKET
+              Value: !Ref AwsBucket
+            - Name: AWS_BUCKET_CLOUDFRONT
+              Value: !Ref AwsBucketCloudfront
+            - Name: AWS_BUCKET_LOCATION
+              Value: !Ref AwsBucketLocation
+            - Name: AWS_LOCATION
+              Value: us-east-1
+            - Name: SITE_HTTPS
+              Value: !Ref SiteHttps
+            - Name: SITE_API_HTTPS
+              Value: !Ref SiteApiHttps
+            - Name: SITE_COMP_HTTPS
+              Value: !Ref SiteCompHttps
+            - Name: FRENET_TOKEN
+              Value: !Ref FrenetToken
+            - Name: FRENET_SELLER_CEP
+              Value: !Ref FrenetSellerCep
+            - Name: SECRET_KEY
+              Value: "\\x80\\xb2\\xe9\\x1dg'\\xb58P\\xf9\\x00\\xb3\\xd7\\xa6\\xdf\\xd5\\xff\\xfby\\x82"
+            - Name: WTF_CSRF_CHECK_DEFAULT
+              Value: false
+            - Name: CACHE_TYPE
+              Value: redis
+            - Name: CACHE_REDIS_HOST
+              Value: !ImportValue ElastiCacheEndpoint
+            - Name: CACHE_REDIS_PORT
+              Value: 6379
+            - Name: WIRECARD_URL
+              Value: https://api.moip.com.br/v2
+            - Name: BCRYPT_LOG_ROUNDS
+              Value: 13
+            - Name: DEBUG_TB_INTERCEPT_REDIRECTS
+              Value: False
+            - Name: DB_USER
+              Value: !Ref AuroraUserName
+            - Name: DB_PASSWORD
+              Value: !Ref AuroraPassword
+            - Name: DB_HOST
+              Value: !Ref AuroraEndpoint
+            - Name: DB_PORT
+              Value: 3306
+            - Name: DB_WAIT
+              Value: 30s
+            - Name: DB_HOST_SLAVE
+              Value: !Ref AuroraEndpoint
+            - Name: DB
+              Value: marketplace
+            - Name: SQLALCHEMY_TRACK_MODIFICATIONS
+              Value: false
+            - Name: JSON_SORT_KEYS
+              Value: false
+            - Name: JWT_EXPIRES
+              Value: 3600
+            - Name: JWT_SECRET_KEY
+              Value: "\\x80\\xb2\\xe9\\x1dg'\\xb58P\\xf9\\x00\\xb3\\xd7\\xa6\\xdf\\xd5\\xff\\xfby\\x82GB"
+            - Name: JWT_ALGORITHM
+              Value: HS256
+            - Name: PRINT_ENV
+              Value: true
+            - Name: DB_MIGRATE
+              Value: true
+            - Name: DB_USER_DISCOVERY
+              Value: !Ref DbUserDiscovery
+            - Name: DB_PASSWORD_DISCOVERY
+              Value: !Ref DbPasswordDiscovery
+            - Name: DB_DISCOVERY
+              Value: !Ref DbDiscovery
+            - Name: DB_PORT_DISCOVERY
+              Value: 3306
+            - Name: DB_HOST_DISCOVERY
+              Value: !Ref DbHostDiscovery
+          Essential: true
+          Image: !Join [':', ['docker.pkg.github.com/thinkideaapp/44express-backend/44express-api', !Ref ImageTag]]
+          RepositoryCredentials:
+            CredentialsParameter: !ImportValue GithubSecret
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: task
+          Name: web-server
+          PortMappings:
+            - ContainerPort: 80
+          Privileged: 'false'
+      Cpu: 512
+      Memory: 1024
+      Family: Api
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !ImportValue ECSTaskExecutionRoleArn
+      TaskRoleArn: !ImportValue ECSTaskExecutionRoleArn
+      RequiresCompatibilities: [FARGATE]
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 20
+      MinCapacity: 2
+      ResourceId: !Join ['/', [service, !ImportValue Cluster, !GetAtt [Service, Name]]]
+      RoleARN: !ImportValue ScalableRole
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - !Ref ScaleUpPolicy
+      AlarmDescription: High CPU alarm for Api
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue Cluster
+        - Name: ServiceName
+          Value: !GetAtt [Service, Name]
+      EvaluationPeriods: 1
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Period: 60
+      Statistic: Average
+      Threshold: 60
+
+  ScaleUpPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: scaleup
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            MetricIntervalUpperBound: !Ref 'AWS::NoValue'
+            ScalingAdjustment: 1
+
+  LowCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - !Ref ScaleDownPolicy
+      AlarmDescription: Low CPU alarm for Api
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue Cluster
+        - Name: ServiceName
+          Value: !GetAtt [Service, Name]
+      EvaluationPeriods: 3
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Period: 60
+      Statistic: Average
+      Threshold: 30
+
+  ScaleDownPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: scaledown
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        StepAdjustments:
+          - MetricIntervalLowerBound: !Ref 'AWS::NoValue'
+            MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+Outputs:
+  ApiServiceImageTag:
+    Description: Image tag for api
+    Value: !Ref ImageTag
+    Export:
+      Name: !Join ['', [!Ref CustomSubDomain, ApiServiceImageTag]]
+
+  ApiDomain:
+    Description: Endpoint for api
+    Value: !Ref ApiDomain
+    Export:
+      Name: !Join ['', [!Ref CustomSubDomain, ApiDomain]]
+
+  LoadBalanceListenerPriority:
+    Description: A prioridade da regra para listners do load balance.
+    Value: !Ref LoadBalanceListenerPriority
+    Export:
+      Name: !Join ['', [!Ref CustomSubDomain, LoadBalanceListenerPriority]]
