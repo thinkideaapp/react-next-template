@@ -13,6 +13,13 @@
         "console": "integratedTerminal",
         "internalConsoleOptions": "neverOpen",
         "port": 9229
+      },
+      {
+        "type": "node",
+        "request": "attach",
+        "name": "Dev",
+        "skipFiles": ["<node_internals>/**"],
+        "port": 9229
       }
     ]
 }
